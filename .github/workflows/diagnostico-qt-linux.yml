@@ -1,14 +1,38 @@
-name: diagnostico-qt-linux
+name: diagnostico-contaminacao-qt-linux
 
 on:
-  push:
-    branches:
-      - fix/macos-global-hotkey-crash
   workflow_dispatch:
 
 jobs:
-  diagnostico:
+  isolar-interferencia:
+    name: "Linux Qt - ${{ matrix.grupo }}"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - grupo: primeira-metade
+            modulos: >-
+              tests/test_30_bugs.py
+              tests/test_aparencia.py
+              tests/test_app.py
+              tests/test_arquitetura.py
+          - grupo: segunda-metade
+            modulos: >-
+              tests/test_atividade.py
+              tests/test_auditoria_30.py
+              tests/test_bolinha.py
+              tests/test_brincadeira.py
+          - grupo: todos-anteriores
+            modulos: >-
+              tests/test_30_bugs.py
+              tests/test_aparencia.py
+              tests/test_app.py
+              tests/test_arquitetura.py
+              tests/test_atividade.py
+              tests/test_auditoria_30.py
+              tests/test_bolinha.py
+              tests/test_brincadeira.py
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUNBUFFERED: "1"
@@ -23,55 +47,22 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: Instalar dependencias nativas do Qt
+      - name: Instalar dependências nativas
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libegl1
 
-      - name: Instalar dependencias Python
+      - name: Instalar dependências Python
         run: python -m pip install -r requirements.txt pytest==8.4.2 pyflakes==4.1.0
 
-      - name: Verificar versoes
+      - name: Registrar versões
         run: |
-          python -c "import PySide6, shiboken6; print('PySide6:', PySide6.__version__, 'Shiboken:', shiboken6.__version__, flush=True)"
-          python -m pytest --version
+          python -c "import PySide6, shiboken6; print('PySide6:', PySide6.__version__, 'Shiboken:', shiboken6.__version__)"
 
-      - name: Caso 025 isolado
-        id: isolado
-        continue-on-error: true
-        run: |
-          python -X faulthandler -m pytest -vv -s --tb=short "tests/test_cantinho_cenarios.py::test_cenario_cantinho[025-olhar-cursor_acima]"
-
-      - name: Arquivo completo com 100 cenarios
-        id: cenarios
-        continue-on-error: true
-        run: |
-          python -X faulthandler -m pytest -vv -s --tb=short tests/test_cantinho_cenarios.py
-
-      - name: Suite completa com rastreio do teardown
-        id: suite
-        continue-on-error: true
-        run: |
-          python -X faulthandler -m pytest -vv --setup-show --tb=short
-
-      - name: Resumo dos experimentos
-        if: always()
+      - name: Executar módulos anteriores e 100 cenários
         env:
-          ISOLADO: ${{ steps.isolado.outcome }}
-          CENARIOS: ${{ steps.cenarios.outcome }}
-          SUITE: ${{ steps.suite.outcome }}
+          MODULOS: ${{ matrix.modulos }}
         run: |
-          echo "Caso isolado: $ISOLADO"
-          echo "100 cenarios: $CENARIOS"
-          echo "Suite completa: $SUITE"
-
-      - name: Falhar se algum experimento falhou
-        if: always()
-        env:
-          ISOLADO: ${{ steps.isolado.outcome }}
-          CENARIOS: ${{ steps.cenarios.outcome }}
-          SUITE: ${{ steps.suite.outcome }}
-        run: |
-          test "$ISOLADO" = success
-          test "$CENARIOS" = success
-          test "$SUITE" = success
+          echo "Grupo: ${{ matrix.grupo }}"
+          echo "Módulos anteriores: $MODULOS"
+          python -X faulthandler -m pytest -vv --setup-show --tb=short $MODULOS tests/test_cantinho_cenarios.py
