@@ -1,0 +1,77 @@
+name: diagnostico-qt-linux
+
+on:
+  push:
+    branches:
+      - fix/macos-global-hotkey-crash
+  workflow_dispatch:
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUNBUFFERED: "1"
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Instalar dependencias nativas do Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1
+
+      - name: Instalar dependencias Python
+        run: python -m pip install -r requirements.txt pytest==8.4.2 pyflakes==4.1.0
+
+      - name: Verificar versoes
+        run: |
+          python -c "import PySide6, shiboken6; print('PySide6:', PySide6.__version__, 'Shiboken:', shiboken6.__version__, flush=True)"
+          python -m pytest --version
+
+      - name: Caso 025 isolado
+        id: isolado
+        continue-on-error: true
+        run: |
+          python -X faulthandler -m pytest -vv -s --tb=short "tests/test_cantinho_cenarios.py::test_cenario_cantinho[025-olhar-cursor_acima]"
+
+      - name: Arquivo completo com 100 cenarios
+        id: cenarios
+        continue-on-error: true
+        run: |
+          python -X faulthandler -m pytest -vv -s --tb=short tests/test_cantinho_cenarios.py
+
+      - name: Suite completa com rastreio do teardown
+        id: suite
+        continue-on-error: true
+        run: |
+          python -X faulthandler -m pytest -vv --setup-show --tb=short
+
+      - name: Resumo dos experimentos
+        if: always()
+        env:
+          ISOLADO: ${{ steps.isolado.outcome }}
+          CENARIOS: ${{ steps.cenarios.outcome }}
+          SUITE: ${{ steps.suite.outcome }}
+        run: |
+          echo "Caso isolado: $ISOLADO"
+          echo "100 cenarios: $CENARIOS"
+          echo "Suite completa: $SUITE"
+
+      - name: Falhar se algum experimento falhou
+        if: always()
+        env:
+          ISOLADO: ${{ steps.isolado.outcome }}
+          CENARIOS: ${{ steps.cenarios.outcome }}
+          SUITE: ${{ steps.suite.outcome }}
+        run: |
+          test "$ISOLADO" = success
+          test "$CENARIOS" = success
+          test "$SUITE" = success
