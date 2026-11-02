@@ -1,0 +1,103 @@
+name: diagnostico-qt-versao-lifecycle
+
+on:
+  push:
+    branches:
+      - fix/macos-global-hotkey-crash
+    paths:
+      - '.github/workflows/diagnostico-qt-versao-lifecycle.yml'
+  workflow_dispatch:
+
+jobs:
+  comparar:
+    name: 'PySide6 ${{ matrix.pyside }} / QApplication estavel=${{ matrix.qt_keepalive }}'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pyside: ['6.12.0', '6.11.3']
+        qt_keepalive: [false, true]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUNBUFFERED: '1'
+      PYTHONFAULTHANDLER: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Instalar bibliotecas do Qt no Ubuntu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1
+
+      - name: Instalar versao selecionada do PySide6 e dependencias
+        env:
+          PYSIDE_VERSION: ${{ matrix.pyside }}
+        run: |
+          python -m pip install "PySide6==$PYSIDE_VERSION"
+          python -m pip install -r requirements.txt pytest==8.4.2 pyflakes==4.1.0
+          python -c "import PySide6, shiboken6; print('PySide6:', PySide6.__version__, 'Shiboken:', shiboken6.__version__)"
+          python -m pip check
+
+      # Mudanca experimental apenas no workspace do runner, sem alterar o repositorio.
+      # Mantem um QApplication vivo na sessao e preserva os demais fixtures originais.
+      - name: Habilitar QApplication de sessao (experimento)
+        if: matrix.qt_keepalive == true
+        run: |
+          cat >> conftest.py <<'PY'
+
+          @pytest.fixture(scope="session", autouse=True)
+          def _qapplication_fixo_por_sessao():
+              from PySide6.QtWidgets import QApplication
+              app = QApplication.instance() or QApplication([])
+              app.setQuitOnLastWindowClosed(False)
+              return app
+          PY
+
+      - name: Validar sintaxe e executar suite duas vezes em processos distintos
+        shell: bash
+        env:
+          PYSIDE_VERSION: ${{ matrix.pyside }}
+          QT_KEEPALIVE: ${{ matrix.qt_keepalive }}
+        run: |
+          mkdir -p logs
+          {
+            echo "PySide6 solicitado: $PYSIDE_VERSION"
+            echo "QApplication persistente: $QT_KEEPALIVE"
+            python --version
+            python -c "import PySide6, shiboken6; print('PySide6:', PySide6.__version__, 'Shiboken:', shiboken6.__version__)"
+            python -m pip freeze
+          } > logs/ambiente.txt 2>&1
+
+          python -m pyflakes pestinha tests main.py ferramentas conftest.py 2>&1 | tee logs/pyflakes.log
+
+          falhas=0
+          for tentativa in 1 2; do
+            echo "::group::Suite completa - tentativa $tentativa"
+            # Preserva a saida do pytest mesmo quando Python aborta com exit 134.
+            set +e
+            python -X faulthandler -m pytest -vv --tb=short 2>&1 | tee "logs/pytest-tentativa-${tentativa}.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf 'Tentativa %s: exit code %s\n' "$tentativa" "$status" | tee -a logs/resultado.txt
+            if [ "$status" -ne 0 ]; then
+              falhas=$((falhas + 1))
+            fi
+            echo "::endgroup::"
+          done
+          echo "Falhas nas 2 tentativas: $falhas" | tee -a logs/resultado.txt
+          test "$falhas" -eq 0
+
+      - name: Publicar logs de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-pyside-${{ matrix.pyside }}-keepalive-${{ matrix.qt_keepalive }}
+          path: logs/
+          if-no-files-found: warn
+          retention-days: 14
