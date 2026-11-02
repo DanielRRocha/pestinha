@@ -26,4 +26,14 @@ jobs:
       # só o necessário para os testes: sem PyInstaller (o executável é gerado à parte)
       - run: pip install -r requirements.txt pytest==8.4.2 pyflakes==4.1.0
       - run: python -m pyflakes pestinha tests main.py ferramentas conftest.py
-      - run: python -m pytest -q
+      - name: Executar testes (Windows e macOS)
+        if: runner.os != 'Linux'
+        run: python -m pytest -q
+      - name: Diagnosticar crash nativo (Linux)
+        if: runner.os == 'Linux'
+        env:
+          PYTHONUNBUFFERED: "1"
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          python -c "import PySide6, shiboken6; print('PySide6:', PySide6.__version__, 'Shiboken:', shiboken6.__version__, flush=True)"
+          python -X faulthandler -m pytest -vv --setup-show --tb=short
