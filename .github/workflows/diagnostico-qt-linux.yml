@@ -1,6 +1,9 @@
 name: diagnostico-contaminacao-qt-linux
 
 on:
+  push:
+    branches:
+      - fix/macos-global-hotkey-crash
   workflow_dispatch:
 
 jobs:
